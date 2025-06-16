@@ -236,7 +236,17 @@ static double divide(double a, double b) {return a / b;}
 static double negate(double a) {return -a;}
 static double comma(double a, double b) {(void)a; return b;}
 static double ternary(double a, double b, double c) {return a == 0 ? b : c;}
-
+static double bitwise_and(double a, double b) { return (double)((int)a & (int)b); }
+static double bitwise_or(double a, double b) { return (double)((int)a | (int)b); }
+static double bitwise_xor(double a, double b) { return (double)((int)a ^ (int)b); }
+static double bitwise_not(double a) { return (double)(~(int)a); }
+static double left_shift(double a, double b) { return (double)((int)a << (int)b); }
+static double right_shift(double a, double b) { return (double)((int)a >> (int)b); }
+static double gt(double a, double b) { return (double)(a > b); }
+static double gt_eq(double a, double b) { return (double)(a >= b); }
+static double eq(double a, double b) { return (double)(a == b); }
+static double lt_eq(double a, double b) { return (double)(a <= b); }
+static double lt(double a, double b) { return (double)(a < b); }
 
 void next_token(state *s) {
     s->type = TOK_NULL;
@@ -252,25 +262,23 @@ void next_token(state *s) {
         if ((s->next[0] >= '0' && s->next[0] <= '9') || s->next[0] == '.') {
             s->value = strtod(s->next, (char**)&s->next);
             s->type = TOK_NUMBER;
-        } else {
+        } else if (isalpha(s->next[0])) {
             /* Look for a variable or builtin function call. */
-            if (isalpha(s->next[0])) {
-                const char *start;
-                start = s->next;
-                while (isalpha(s->next[0]) || isdigit(s->next[0]) || (s->next[0] == '_')) s->next++;
-                
-                const te_variable *var = find_lookup(s, start, s->next - start);
-                if (!var) var = find_builtin(start, s->next - start);
 
-                if (!var) {
-                    s->type = TOK_ERROR;
-                } else {
-                    switch(TYPE_MASK(var->type))
-                    {
-                        case TE_VARIABLE:
-                            s->type = TOK_VARIABLE;
-                            s->bound = var->address;
-                            break;
+            const char *start = s->next;
+            while (isalpha(s->next[0]) || isdigit(s->next[0]) || (s->next[0] == '_')) s->next++;
+
+            const te_variable *var = find_lookup(s, start, s->next - start);
+            if (!var) var = find_builtin(start, s->next - start);
+
+            if (!var) {
+                s->type = TOK_ERROR;
+            } else {
+                switch (TYPE_MASK(var->type)) {
+                    case TE_VARIABLE:
+                        s->type = TOK_VARIABLE;
+                        s->bound = var->address;
+                        break;
 
                         case TE_CLOSURE0: case TE_CLOSURE1: case TE_CLOSURE2: case TE_CLOSURE3:         /* Falls through. */
                         case TE_CLOSURE4: case TE_CLOSURE5: case TE_CLOSURE6: case TE_CLOSURE7:         /* Falls through. */
@@ -281,26 +289,60 @@ void next_token(state *s) {
                             s->type = var->type;
                             s->function = var->address;
                             break;
-                    }
                 }
+            }
 
-            } else {
+        } else {
                 /* Look for an operator or special character. */
-                switch (s->next++[0]) {
-                    case '+': s->type = TOK_INFIX; s->function = add; break;
-                    case '-': s->type = TOK_INFIX; s->function = sub; break;
-                    case '*': s->type = TOK_INFIX; s->function = mul; break;
-                    case '/': s->type = TOK_INFIX; s->function = divide; break;
-                    case '^': s->type = TOK_INFIX; s->function = pow; break;
-                    case '%': s->type = TOK_INFIX; s->function = fmod; break;
-                    case '(': s->type = TOK_OPEN; break;
-                    case ')': s->type = TOK_CLOSE; break;
-                    case '?': s->type = TOK_TERNARY_COND; break;
-                    case ':':s->type = TOK_TERNARY_ELSE; break;
-                    case ',': s->type = TOK_SEP; break;
-                    case ' ': case '\t': case '\n': case '\r': break;
-                    default: s->type = TOK_ERROR; break;
-                }
+            switch (s->next++[0]) {
+                case '+': s->type = TOK_INFIX; s->function = add; break;
+                case '-': s->type = TOK_INFIX; s->function = sub; break;
+                case '*': s->type = TOK_INFIX; s->function = mul; break;
+                case '/': s->type = TOK_INFIX; s->function = divide; break;
+                case '&':
+                    if (*s->next == '&') ++s->next; // Skip logical AND
+                    s->type = TOK_INFIX;
+                    s->function = bitwise_and;
+                    break;
+                case '|':
+                    if (*s->next == '|') ++s->next; // Skip logical OR
+                    s->type = TOK_INFIX;
+                    s->function = bitwise_or;
+                    break;
+                case '~':
+                    s->type = TE_FUNCTION1 | TE_FLAG_PURE;
+                    s->function = bitwise_not;
+                    break;
+                case '<':
+                    switch (s->next++[0])
+                    {
+                        case '<': s->type = TOK_INFIX;  s -> function=left_shift; break;
+                        case '=': s->type = TOK_INFIX;  s -> function=lt_eq; break;
+                        default: s->type = TOK_INFIX;  s -> function=lt; break;
+                    }
+                    break;
+                case '>':
+                    switch (s->next++[0])
+                    {
+                        case '>': s->type = TOK_INFIX;  s -> function=right_shift; break;
+                        case '=': s->type = TOK_INFIX;  s -> function=gt_eq; break;
+                        default: s->type = TOK_INFIX;  s -> function=gt; break;
+                    }
+                    break;
+                case '=':
+                    if (*s->next == '=') ++s->next;
+                    s->type = TOK_INFIX;
+                    s->function = eq;
+                    break;
+                case '^': s->type = TOK_INFIX; s->function = pow; break;
+                case '%': s->type = TOK_INFIX; s->function = fmod; break;
+                case '(': s->type = TOK_OPEN; break;
+                case ')': s->type = TOK_CLOSE; break;
+                case '?': s->type = TOK_TERNARY_COND; break;
+                case ':':s->type = TOK_TERNARY_ELSE; break;
+                case ',': s->type = TOK_SEP; break;
+                case ' ': case '\t': case '\n': case '\r': break;
+                default: s->type = TOK_ERROR; break;
             }
         }
     } while (s->type == TOK_NULL);
@@ -533,7 +575,9 @@ static te_expr *term(state *s) {
     te_expr *ret = factor(s);
     CHECK_NULL(ret);
 
-    while (s->type == TOK_INFIX && (s->function == mul || s->function == divide || s->function == fmod)) {
+    while (s->type == TOK_INFIX && (s->function == mul || s->function == divide || s->function == fmod ||
+    s->function == bitwise_and || s->function == bitwise_or || s->function == bitwise_xor || s->function == left_shift || s->function == right_shift ||
+    s->function == gt || s->function == gt_eq || s->function == eq || s->function == lt_eq || s->function == lt)) {
         te_fun2 t = s->function;
         next_token(s);
         te_expr *f = factor(s);
